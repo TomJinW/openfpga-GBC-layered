@@ -2,6 +2,7 @@
 
 `define isgbc 1
 `define isrumble 0
+`define ismotion 0
 
 module core_top (
 
@@ -568,7 +569,7 @@ logic [16:0] bk_addr;
 logic [15:0] bk_data, bk_q;
 logic [31:0] save_rd_data, loaded_save_size;
 
-save_handler #(.RUMBLE_CORE(`isrumble)) save_handler
+save_handler #(.RUMBLE_CORE(`isrumble | `ismotion)) save_handler
 (
   .clk_74a              ( clk_74a                         ),
   .clk_sys              ( clk_sys                         ),
@@ -725,11 +726,18 @@ end
 reg isGBC = `isgbc;
 
 wire sd_active = startup_accepted && startup_sd_save;
-wire cart_ram_window = !sd_active && cart_a15 && !cart_addr[14] && !nCS;
+// Motion core: the MBC7 sensor registers ($A020-$A05F reads, $A000/$A010 writes
+// and the two enable writes) go to the cartridge, everything else, including the
+// EEPROM at $A080, stays in the FPGA so the save lives on the SD card.
+wire motion_win = cart_a15 && !cart_addr[14] && !nCS && !cart_addr[12];
+wire motion_read_win = motion_win && cart_addr[7:4] >= 4'd2 && cart_addr[7:4] <= 4'd5;
+wire motion_latch_win = motion_win && cart_addr[7:4] <= 4'd1;
+wire cart_ram_window = (`ismotion != 0) ? (sd_active && motion_read_win) : (!sd_active && cart_a15 && !cart_addr[14] && !nCS);
 wire backend_cart_rd = cart_rd && !cart_ram_window;
 wire backend_cart_wr = cart_wr && !cart_ram_window;
-wire sd_rumble_wr = sd_active && cart_wr && !cart_a15 && cart_addr[14] && !cart_addr[13];
-wire cart_access = startup_accepted && !reset && (sd_active ? sd_rumble_wr : (cart_wr || (cart_rd && cart_ram_window)));
+wire sd_fwd_wr = sd_active && cart_wr && ((`ismotion != 0) ? ((!cart_a15 && !cart_addr[13]) || motion_latch_win)
+                                                           : (!cart_a15 && cart_addr[14] && !cart_addr[13]));
+wire cart_access = startup_accepted && !reset && (sd_active ? (sd_fwd_wr || (cart_rd && cart_ram_window)) : (cart_wr || (cart_rd && cart_ram_window)));
 wire cart_read_access = startup_accepted && !reset && cart_rd && cart_ram_window && !cart_wr;
 wire cart_write_access = cart_access && cart_wr;
 wire [5:0] cart_phi_period_m1 = speed ? 6'd15 : 6'd31;
@@ -794,7 +802,7 @@ wire startup_accepted, startup_ready, startup_valid, startup_selection, startup_
 wire [15:0] startup_probe_addr;
 wire startup_probe_read;
 wire [15:0] physical_addr = startup_accepted ? {cart_a15, cart_addr} : startup_probe_addr;
-layered_startup #(.RUMBLE_CORE(`isrumble)) startup (
+layered_startup #(.RUMBLE_CORE(`isrumble), .MOTION_CORE(`ismotion)) startup (
   .clk(clk_sys), .reset(reset), .rom_download(cart_download),
   .ioctl_wr(ioctl_wr), .ioctl_addr(ioctl_addr), .ioctl_data(ioctl_dout),
   .keys(cont1_key_s), .cart_data(cart_tran_bank1),
@@ -1275,7 +1283,7 @@ wire startup_accepted_vid;
 synch_3 startup_video_sync(startup_accepted, startup_accepted_vid, clk_vid);
 wire [23:0] startup_rgb;
 wire startup_de, startup_hs, startup_vs;
-layered_startup_video #(.RUMBLE_CORE(`isrumble)) startup_video (
+layered_startup_video #(.RUMBLE_CORE(`isrumble), .MOTION_CORE(`ismotion)) startup_video (
   .clk(clk_vid), .reset(!pll_core_locked),
   .ready(startup_ready), .valid_cart(startup_valid), .select_continue(startup_selection),
   .fields_match(startup_match), .confirm(startup_confirm),

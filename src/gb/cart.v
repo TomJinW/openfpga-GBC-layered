@@ -414,7 +414,8 @@ wire [7:0]    cram_di = sleep_savestate ? Savestate_CRAMWriteData : mbc_cram_wr 
 
 // RAM size
 assign ram_mask_file =              // 0 - no ram
-		(mbc2 || mbc7 || tama)?8'h01:       // mbc2 512x4bits, mbc7 256 bytes EEPROM, TAMA 32 bytes
+		mbc7?8'h80:                         // mbc7 256 bytes EEPROM (special code, see save_handler)
+		(mbc2 || tama)?8'h01:               // mbc2 512x4bits, TAMA 32 bytes
 	   (cart_ram_size == 1)?8'h03:  // 1 - 2k, 1 bank		 sd_lba[1:0]
 	   (cart_ram_size == 2)?8'h0F:  // 2 - 8k, 1 bank		 sd_lba[3:0]
 	   (cart_ram_size == 3)?8'h3F:  // 3 - 32k, 4 banks	 sd_lba[5:0]

@@ -1,11 +1,12 @@
 // Fixed 160x144 startup display, independent of the held-in-reset GB CPU.
-module layered_startup_video #(parameter RUMBLE_CORE = 0) (
+module layered_startup_video #(parameter RUMBLE_CORE = 0, parameter MOTION_CORE = 0) (
   input wire clk, reset,
   input wire ready, valid_cart, select_continue, fields_match, confirm, sd_available, sd_save,
   input wire [255:0] rom_header, cart_header,
   output reg [23:0] rgb,
   output wire de, hs, vs
 );
+  localparam SD_CORE = RUMBLE_CORE || MOTION_CORE;
   // The headers are only read while ready is set, when they cannot change
   // (they are written during ROM download and the cartridge probe, both of
   // which clear ready), so they are used directly across the asynchronous clock
@@ -40,7 +41,7 @@ module layered_startup_video #(parameter RUMBLE_CORE = 0) (
       else glyph_x <= glyph_x + 1'b1;
     end
   end
-  wire rom_rumble = rh[191:184] >= 8'h1C && rh[191:184] <= 8'h1E;
+  wire rom_ok = MOTION_CORE ? rh[191:184] == 8'h22 : (rh[191:184] >= 8'h1C && rh[191:184] <= 8'h1E);
   wire match = status[3], confirming = status[4], sd_avail = status[5], sd_on = status[6];
   function automatic [7:0] hexchar(input [3:0] n);
     hexchar = n < 10 ? 8'd48+n : 8'd65+n-10;
@@ -143,22 +144,22 @@ module layered_startup_video #(parameter RUMBLE_CORE = 0) (
     case(row)
       3: text_line="CARTRIDGE                 ";
       7: text_line="ROM FILE                  ";
-      0: text_line = RUMBLE_CORE ? "LAYERED - RUMBLE + SD SAVE" : "LAYERED - SAVE WARNING    ";
+      0: text_line = RUMBLE_CORE ? "LAYERED - RUMBLE + SD SAVE" : MOTION_CORE ? "LAYERED - MOTION + SD SAVE" : "LAYERED - SAVE WARNING    ";
       1: text_line = !status[2] ? "READING CARTRIDGE...      " :
                      !status[1] ? "NO VALID GB/GBC CARTRIDGE " :
-                     RUMBLE_CORE && !sd_avail ? "NEED MBC5 RUMBLE CARTRIDGE" :
+                     SD_CORE && !sd_avail ? (MOTION_CORE ? "NEED MBC7 SENSOR CARTRIDGE" : "NEED MBC5 RUMBLE CARTRIDGE") :
                      confirming ? "ARE YOU SURE?             " :
-                     sd_on ? "SD SAVE  CART RUMBLE ONLY " : match ? "TITLE / TYPE / RAM MATCH  " : "HEADER FIELDS DIFFER      ";
+                     sd_on ? (MOTION_CORE ? "SD SAVE  CART SENSOR ONLY " : "SD SAVE  CART RUMBLE ONLY ") : match ? "TITLE / TYPE / RAM MATCH  " : "HEADER FIELDS DIFFER      ";
       5,9: text_line = {mapper(header[191:184])," ROM:",romsize(header[199:192])," RAM:",ramsize(header[207:200],header[191:184]),"  "};
-      15: text_line = confirming ? " CANCEL       CONTINUE    " : status[1] && (!RUMBLE_CORE || sd_avail) ? "              CONTINUE    " : "                          ";
+      15: text_line = confirming ? " CANCEL       CONTINUE    " : status[1] && (!SD_CORE || sd_avail) ? "              CONTINUE    " : "                          ";
       16: text_line = confirming ? "ARROWS: SELECT  A: CONFIRM" : "A: CONTINUE               ";
       17: text_line = confirming ? "B: CANCEL  MENU: QUIT     " : "MENU: QUIT                ";
-      11: text_line = RUMBLE_CORE && sd_avail ? "SAVE:  SD CARD ONLY       " : "                          ";
-      12: text_line = sd_on ? "CARTRIDGE SAVE IS SAFE.   " : RUMBLE_CORE ? "                          " : confirming ? "WRONG ROM MAY ERASE SAVE. " : "GAME MAY OVERWRITE SAVE.  ";
-      13: text_line = sd_on ? "SAVE FILE ON SD CARD.     " : RUMBLE_CORE ? "                          " : confirming ? "FILES DO NOT MATCH.       " : "BACK UP YOUR SAVE FIRST.  ";
+      11: text_line = SD_CORE && sd_avail ? "SAVE:  SD CARD ONLY       " : "                          ";
+      12: text_line = sd_on ? "CARTRIDGE SAVE IS SAFE.   " : SD_CORE ? "                          " : confirming ? "WRONG ROM MAY ERASE SAVE. " : "GAME MAY OVERWRITE SAVE.  ";
+      13: text_line = sd_on ? "SAVE FILE ON SD CARD.     " : SD_CORE ? "                          " : confirming ? "FILES DO NOT MATCH.       " : "BACK UP YOUR SAVE FIRST.  ";
       14: text_line = confirming ? "CONTINUE ANYWAY?          " :
-                      sd_on && !rom_rumble ? "ROM TYPE HAS NO RUMBLE    " :
-                      sd_on && rh[207:200] == 0 ? "ROM HAS NO SAVE RAM       " : "                          ";
+                      sd_on && !rom_ok ? (MOTION_CORE ? "ROM TYPE IS NOT MBC7      " : "ROM TYPE HAS NO RUMBLE    ") :
+                      sd_on && !MOTION_CORE && rh[207:200] == 0 ? "ROM HAS NO SAVE RAM       " : "                          ";
       default: ;
     endcase
     character = text_line[207-column*8 -: 8];
@@ -171,7 +172,7 @@ module layered_startup_video #(parameter RUMBLE_CORE = 0) (
     rgb = 24'h101820;
     if (de && px >= 2 && px < 158 && glyph_x < 5 && py[2:0] < 7 && pixels[34-py[2:0]*5-glyph_x]) begin
       rgb = 24'he8edf2;
-      if ((row == 0 || row == 12) && !sd_on && !RUMBLE_CORE || (row == 1 && status[1] && (RUMBLE_CORE ? !sd_avail : !match)) || (row == 14 && sd_on && !rom_rumble) || (confirming && (row == 13 || row == 14))) rgb = 24'hffbc55;
+      if ((row == 0 || row == 12) && !sd_on && !SD_CORE || (row == 1 && status[1] && (SD_CORE ? !sd_avail : !match)) || (row == 14 && sd_on && !rom_ok) || (confirming && (row == 13 || row == 14))) rgb = 24'hffbc55;
       if (row == 15 || row == 11) rgb = 24'h65dbb0;
     end
     if (!de) rgb = 0;

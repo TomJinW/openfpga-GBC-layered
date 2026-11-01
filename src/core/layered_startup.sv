@@ -2,7 +2,9 @@
 // RUMBLE_CORE = 0: the cartridge save is always used.
 // RUMBLE_CORE = 1: the save is always on the SD card and the cartridge, which
 // must be MBC5+RUMBLE, is only a rumble source.
-module layered_startup #(parameter RUMBLE_CORE = 0) (
+// MOTION_CORE = 1: the save is always on the SD card and the cartridge, which
+// must be MBC7, is only a motion sensor.
+module layered_startup #(parameter RUMBLE_CORE = 0, parameter MOTION_CORE = 0) (
   input wire clk, reset, rom_download, ioctl_wr,
   input wire [24:0] ioctl_addr,
   input wire [15:0] ioctl_data,
@@ -39,7 +41,10 @@ module layered_startup #(parameter RUMBLE_CORE = 0) (
   // Only an MBC5+RUMBLE cartridge (0x1C..0x1E) may be used as a rumble source
   // with the ROM's save kept on the SD card. Then the cartridge's memory is never
   // touched.
-  assign sd_available = RUMBLE_CORE && ready && valid_cart && cart_header[191:184] >= 8'h1C && cart_header[191:184] <= 8'h1E;
+  localparam SD_CORE = RUMBLE_CORE || MOTION_CORE;
+  assign sd_available = ready && valid_cart && (
+    (RUMBLE_CORE && cart_header[191:184] >= 8'h1C && cart_header[191:184] <= 8'h1E) ||
+    (MOTION_CORE && cart_header[191:184] == 8'h22));
   assign sd_save = sd_available;
   // With an SD save the cartridge is not the ROM's game, so a mismatch is expected.
   assign fields_match = sd_save || header_match;
@@ -94,7 +99,7 @@ module layered_startup #(parameter RUMBLE_CORE = 0) (
       if (armed) begin
         // First page: A continues. A header mismatch opens a second page with
         // CANCEL (default) and CONTINUE, which needs its own confirmation.
-        if (pressed[4] && valid_cart && (!RUMBLE_CORE || sd_available) && (!confirm || select_continue)) begin
+        if (pressed[4] && valid_cart && (!SD_CORE || sd_available) && (!confirm || select_continue)) begin
           if (fields_match || confirm) accepted <= 1;
           else begin
             confirm <= 1;

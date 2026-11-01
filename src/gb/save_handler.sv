@@ -104,7 +104,7 @@ module save_handler #(parameter RUMBLE_CORE = 0) (
 
       if(!RUMBLE_CORE) begin
         datatable_data <= 0;
-      end else if(RTC_inuse) begin
+      end else if(RTC_inuse && ram_mask_file != 8'h80) begin
         datatable_data <= save_size_bytes + 16;
       end else begin
         datatable_data <= save_size_bytes;
@@ -115,6 +115,7 @@ module save_handler #(parameter RUMBLE_CORE = 0) (
   always_comb begin
     if (cart_has_save) begin
       case(ram_mask_file)
+        8'h80   : save_size_bytes = 256;   // MBC7: the 93LC56 EEPROM, 128 16-bit words
         8'h01   : save_size_bytes = 512;
         8'h03   : save_size_bytes = 2048;
         8'h0F   : save_size_bytes = 8192;

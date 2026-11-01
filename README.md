@@ -2,7 +2,7 @@
 
 This is TomJinW's layered fork of [budude2/openfpga-GBC](https://github.com/budude2/openfpga-GBC), which was ported from the [MiSTer Gameboy core](https://github.com/MiSTer-devel/Gameboy_MiSTer).
 
-The packaged cores install as `budude2-TomJinW.GB-layered`, `budude2-TomJinW.GBC-layered`, `budude2-TomJinW.GB-rumble` and `budude2-TomJinW.GBC-rumble`, so they can coexist with the original `budude2.GB` and `budude2.GBC` cores. They continue to use the shared `gb` and `gbc` platform asset directories.
+The packaged cores install as `budude2-TomJinW.GB-layered`, `budude2-TomJinW.GBC-layered`, `budude2-TomJinW.GB-rumble`, `budude2-TomJinW.GBC-rumble`, `budude2-TomJinW.GB-motion` and `budude2-TomJinW.GBC-motion`, so they can coexist with the original `budude2.GB` and `budude2.GBC` cores. They continue to use the shared `gb` and `gbc` platform asset directories.
 
 This fork is intended only for a layered setup: load a ROM file from SD while
 using the inserted physical cartridge for its mapper control, save memory, and
@@ -76,3 +76,22 @@ In a rumble core:
 
 The layered cores report no save to the Pocket, so they create no `.sav` file.
 (Not yet confirmed on hardware.)
+
+## Motion variants (SD save, sensor from a cartridge)
+
+`GB-motion` and `GBC-motion` run a game from the SD card with its save on the SD
+card (the MBC7 EEPROM is emulated in the FPGA) and use a genuine MBC7 cartridge
+(Kirby Tilt 'n' Tumble, header type 0x22) only as the motion sensor.
+
+- The startup screen requires an MBC7 cartridge (`NEED MBC7 SENSOR CARTRIDGE`
+  otherwise, and CONTINUE is disabled). A ROM that is not MBC7 is flagged with
+  `ROM TYPE IS NOT MBC7`.
+- Only these accesses reach the cartridge: the two RAM enable writes
+  ($0000-$1FFF, $4000-$5FFF), the erase/latch writes to $A000 and $A010, and
+  reads of the sensor registers $A020-$A05F. The EEPROM at $A080 and everything
+  else stay in the FPGA, so the cartridge's own save is never read or written.
+- `sample-motion-game` is a tilt-ball example for this hardware.
+- The save is the raw 256-byte 93LC56 EEPROM (`<rom name>.sav`, 128 16-bit
+  words, high byte first), with no RTC block, the same size emulators use.
+  The byte order against emulator saves has not been compared yet.
+- Not yet validated on hardware.
