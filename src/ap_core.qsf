@@ -808,6 +808,8 @@ set_global_assignment -name VERILOG_FILE gb/lcd.v
 set_global_assignment -name VERILOG_FILE gb/gb.v
 set_global_assignment -name VERILOG_FILE gb/cart.v
 set_global_assignment -name SYSTEMVERILOG_FILE core/core_top.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/layered_startup.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/layered_startup_video.sv
 set_global_assignment -name QIP_FILE apf/apf.qip
 set_global_assignment -name QIP_FILE apf/mf_ddio_bidir_12.qip
 set_global_assignment -name VERILOG_FILE core/core_bridge_cmd.v

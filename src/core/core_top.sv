@@ -1,6 +1,7 @@
 `default_nettype none
 
 `define isgbc 1
+`define isrumble 0
 
 module core_top (
 
@@ -509,7 +510,9 @@ synch_3 #(.WIDTH(32)) s06 (cont3_key,       cont3_key_s,        clk_sys);
 synch_3 #(.WIDTH(32)) s07 (cont4_key,       cont4_key_s,        clk_sys);
 synch_3 #(.WIDTH(32)) s08 (boot_settings,   boot_settings_s,    clk_sys);
 synch_3 #(.WIDTH(32)) s09 (run_settings,    run_settings_s,     clk_sys);
-synch_3               s10 (osnotify_adapter_play, cart_physical_mode, clk_sys);
+// Layered core always uses an SD-loaded ROM and the inserted cartridge's
+// mapper/RAM/RTC. The OS "Play Cartridge" path skips ROM slot loading.
+assign cart_physical_mode = 1'b1;
 
 logic sgb_en, rumble_en, originalcolors, ff_snd_en, ff_en, sgb_border_en, gba_en, audio_no_pops;
 logic [1:0] tint;
@@ -565,7 +568,7 @@ logic [16:0] bk_addr;
 logic [15:0] bk_data, bk_q;
 logic [31:0] save_rd_data, loaded_save_size;
 
-save_handler save_handler
+save_handler #(.RUMBLE_CORE(`isrumble)) save_handler
 (
   .clk_74a              ( clk_74a                         ),
   .clk_sys              ( clk_sys                         ),
@@ -689,6 +692,10 @@ logic [24:0] ioctl_addr;
 logic [15:0] ioctl_dout;
 logic boot_download, cart_download, palette_download, sgb_border_download, cgb_boot_download, dmg_boot_download, sgb_boot_download;
 logic cart_physical_mode, rumble_cart_wr, rumble_cart_rumble;
+// SD save: the cartridge is only a rumble source. ROM, RAM and RTC all stay on
+// the SD card side; only writes to the MBC5 RAM bank register (0x4000-0x5FFF,
+// whose bit 3 drives the motor) are forwarded to the cartridge.
+wire startup_sd_avail, startup_sd_save;
 logic cart_oe_backend, cart_phi, cart_speed_prev;
 logic [7:0] cart_do_backend;
 logic [5:0] cart_phi_counter;
@@ -717,11 +724,14 @@ end
 
 reg isGBC = `isgbc;
 
-wire backend_cart_rd = ~cart_physical_mode & cart_rd;
-wire backend_cart_wr = ~cart_physical_mode & cart_wr;
-wire cart_access = cart_physical_mode & (cart_rd | cart_wr);
-wire cart_read_access = cart_access & ~cart_wr;
-wire cart_write_access = cart_access & cart_wr;
+wire sd_active = startup_accepted && startup_sd_save;
+wire cart_ram_window = !sd_active && cart_a15 && !cart_addr[14] && !nCS;
+wire backend_cart_rd = cart_rd && !cart_ram_window;
+wire backend_cart_wr = cart_wr && !cart_ram_window;
+wire sd_rumble_wr = sd_active && cart_wr && !cart_a15 && cart_addr[14] && !cart_addr[13];
+wire cart_access = startup_accepted && !reset && (sd_active ? sd_rumble_wr : (cart_wr || (cart_rd && cart_ram_window)));
+wire cart_read_access = startup_accepted && !reset && cart_rd && cart_ram_window && !cart_wr;
+wire cart_write_access = cart_access && cart_wr;
 wire [5:0] cart_phi_period_m1 = speed ? 6'd15 : 6'd31;
 wire [5:0] cart_phi_high_m1 = speed ? 6'd11 : 6'd23;
 wire cart_phi_fall = cart_physical_mode && (cart_phi_counter == cart_phi_high_m1);
@@ -731,7 +741,7 @@ wire  [1:0] sdram_ds     =  cart_download ? 2'b11 : {mbc_addr[0], ~mbc_addr[0]};
 wire [15:0] sdram_do;
 wire [15:0] sdram_di     =  cart_download ? ioctl_dout : 16'd0;
 wire [23:0] sdram_addr   =  cart_download ? ioctl_addr[24:1] : {2'b00, mbc_addr[22:1]};
-wire sdram_oe            = ~cart_download & cart_rd & ~cram_rd;
+wire sdram_oe            = ~cart_download & backend_cart_rd & ~cram_rd;
 wire sdram_we            =  cart_download & dn_write;
 wire sdram_refresh_force;
 wire sdram_autorefresh   = !ff_on;
@@ -776,24 +786,39 @@ wire rumbling;
 wire RTC_inuse;
 
 assign cart_wait_n = 1'b1;
-assign cart_do = cart_physical_mode ? cart_tran_bank1 : cart_do_backend;
-assign cart_oe = cart_physical_mode ? cart_read_access : cart_oe_backend;
+assign cart_do = cart_ram_window ? cart_tran_bank1 : cart_do_backend;
+assign cart_oe = cart_ram_window ? cart_read_access : cart_oe_backend;
 
-assign cart_tran_bank3     = cart_access ? cart_addr[7:0] : {6'hzz, rumble_cart_rumble, 1'bz};
+wire [255:0] startup_rom_header, startup_cart_header;
+wire startup_accepted, startup_ready, startup_valid, startup_selection, startup_match, startup_confirm;
+wire [15:0] startup_probe_addr;
+wire startup_probe_read;
+wire [15:0] physical_addr = startup_accepted ? {cart_a15, cart_addr} : startup_probe_addr;
+layered_startup #(.RUMBLE_CORE(`isrumble)) startup (
+  .clk(clk_sys), .reset(reset), .rom_download(cart_download),
+  .ioctl_wr(ioctl_wr), .ioctl_addr(ioctl_addr), .ioctl_data(ioctl_dout),
+  .keys(cont1_key_s), .cart_data(cart_tran_bank1),
+  .probe_addr(startup_probe_addr), .probe_read(startup_probe_read),
+  .accepted(startup_accepted), .ready(startup_ready), .valid_cart(startup_valid),
+  .select_continue(startup_selection), .fields_match(startup_match), .confirm(startup_confirm),
+  .sd_available(startup_sd_avail), .sd_save(startup_sd_save),
+  .rom_header(startup_rom_header),
+  .cart_header(startup_cart_header)
+);
+
+assign cart_tran_bank3     = physical_addr[7:0];
 assign cart_tran_bank3_dir = 1'b1;
 
-assign cart_tran_bank2     = cart_physical_mode ? {cart_a15, cart_addr[14:8]} : 8'hzz;
-assign cart_tran_bank2_dir = cart_physical_mode;
+assign cart_tran_bank2     = physical_addr[15:8];
+assign cart_tran_bank2_dir = 1'b1;
 
 assign cart_tran_bank1     = cart_write_access ? cart_di : 8'hzz;
 assign cart_tran_bank1_dir = cart_write_access;
 
-assign cart_tran_bank0     = cart_physical_mode
-                           ? {cart_phi,
-                              cart_access ? ~cart_wr : rumble_cart_wr,
-                              cart_access ? cart_wr : 1'b1,
-                              cart_access ? nCS : 1'b1}
-                           : {1'bz, rumble_cart_wr, 2'hz};
+assign cart_tran_bank0     = {cart_phi,
+                              cart_write_access ? 1'b0 : 1'b1,
+                              (cart_read_access || startup_probe_read) ? 1'b0 : 1'b1,
+                              cart_access ? nCS : 1'b1};
 assign cart_tran_bank0_dir = 1'b1;
 
 assign cart_tran_pin30       = 1'b0;
@@ -972,7 +997,7 @@ end
 // the gameboy itself
 gb gb
 (
-  .reset                  ( reset | ~loading_done   ),
+  .reset                  ( reset | ~loading_done | ~startup_accepted ),
   
   .clk_sys                ( clk_sys                 ),
   .ce                     ( ce_cpu                  ),   // the whole gameboy runs on 4mhnz
@@ -1062,8 +1087,8 @@ gb gb
 
 wire [15:0] audio_l, audio_r;
 
-assign audio_l = (fast_forward && ~ff_snd_en) ? 16'd0 : GB_AUDIO_L;
-assign audio_r = (fast_forward && ~ff_snd_en) ? 16'd0 : GB_AUDIO_R;
+assign audio_l = (!startup_accepted || (fast_forward && ~ff_snd_en)) ? 16'd0 : GB_AUDIO_L;
+assign audio_r = (!startup_accepted || (fast_forward && ~ff_snd_en)) ? 16'd0 : GB_AUDIO_R;
 
 audio_mixer #(
   .DW     ( 16  ),
@@ -1246,15 +1271,29 @@ end
 
 assign video_rgb_clock    = clk_vid;
 assign video_rgb_clock_90 = clk_vid_90;
-assign video_de           = video_de_reg;
-assign video_hs           = video_hs_reg;
-assign video_vs           = video_vs_reg;
+wire startup_accepted_vid;
+synch_3 startup_video_sync(startup_accepted, startup_accepted_vid, clk_vid);
+wire [23:0] startup_rgb;
+wire startup_de, startup_hs, startup_vs;
+layered_startup_video #(.RUMBLE_CORE(`isrumble)) startup_video (
+  .clk(clk_vid), .reset(!pll_core_locked),
+  .ready(startup_ready), .valid_cart(startup_valid), .select_continue(startup_selection),
+  .fields_match(startup_match), .confirm(startup_confirm),
+  .sd_available(startup_sd_avail), .sd_save(startup_sd_save),
+  .rom_header(startup_rom_header), .cart_header(startup_cart_header),
+  .rgb(startup_rgb), .de(startup_de), .hs(startup_hs), .vs(startup_vs)
+);
+assign video_de           = startup_accepted_vid ? video_de_reg : startup_de;
+assign video_hs           = startup_accepted_vid ? video_hs_reg : startup_hs;
+assign video_vs           = startup_accepted_vid ? video_vs_reg : startup_vs;
 
 wire [7:0] lum;
 assign lum = (21 * video_rgb_reg[23:16] + 72 * video_rgb_reg[15:8] + 7 * video_rgb_reg[7:0]) / 100;
 
 always_comb begin
-  if(~video_de_reg) begin
+  if (!startup_accepted_vid) begin
+    video_rgb = startup_rgb;
+  end else if(~video_de_reg) begin
     if(sgb_border_en & sgb_en) begin
       video_rgb[23:13] = 1;
       video_rgb[12:3]  = 0;
@@ -1277,7 +1316,7 @@ end
 
 wire ce_cpu, ce_cpu2x;
 wire cart_act     = cart_wr | cart_rd;
-wire fastforward  = ff_en && cont1_key_s[9] && !ioctl_download;
+wire fastforward  = startup_accepted && ff_en && cont1_key_s[9] && !ioctl_download;
 wire ff_on;
 wire sleep_savestate;
 reg paused;

@@ -1,4 +1,4 @@
-module save_handler (
+module save_handler #(parameter RUMBLE_CORE = 0) (
   input logic          clk_74a,
   input logic          clk_sys,
   input logic          reset,
@@ -97,10 +97,14 @@ module save_handler (
     end else begin
       // Data slot index 1, not id 1
       datatable_addr <= 1 * 2 + 1;
-      // Write sram size
+      // Write sram size, derived from the ROM header as in the original core.
+      // The cartridge-save core never uses the SD-side RAM, so it reports no
+      // save at all and the Pocket creates no .sav.
       datatable_wren <= 1;
 
-      if(RTC_inuse) begin
+      if(!RUMBLE_CORE) begin
+        datatable_data <= 0;
+      end else if(RTC_inuse) begin
         datatable_data <= save_size_bytes + 16;
       end else begin
         datatable_data <= save_size_bytes;
