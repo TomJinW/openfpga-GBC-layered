@@ -1,1 +1,4 @@
-Layered fork by TomJinW. Based on the openfpga-GBC port by budude2 and the MiSTer Gameboy core.
+ROM from the SD card, mapper, save, RTC and peripherals from the inserted cartridge.
+Insert the matching cartridge first. The startup screen compares the cartridge and ROM headers; if they differ it asks twice before the game can touch the cartridge save.
+The save stays on the cartridge and no .sav is created. Back it up first.
+Based on the openfpga-GBC port by budude2 and the MiSTer Gameboy core. Layered fork by TomJinW.
