@@ -4,11 +4,20 @@ This is TomJinW's layered fork of [budude2/openfpga-GBC](https://github.com/budu
 
 The packaged cores install as `budude2-TomJinW.GB-layered`, `budude2-TomJinW.GBC-layered`, `budude2-TomJinW.GB-rumble`, `budude2-TomJinW.GBC-rumble`, `budude2-TomJinW.GB-motion` and `budude2-TomJinW.GBC-motion`, so they can coexist with the original `budude2.GB` and `budude2.GBC` cores. They continue to use the shared `gb` and `gbc` platform asset directories.
 
-This fork is intended only for a layered setup: load a ROM file from SD while
-using the inserted physical cartridge for its mapper control, save memory, and
-RTC or other cartridge peripherals. The ROM file and cartridge must be the same
-game with a compatible mapper and save layout. Use the original core for normal
-ROM-only or cartridge-only play.
+This fork has three kinds of cores, all of which load the ROM file from the SD
+card and use the inserted physical cartridge for something:
+
+- **layered** (`GB-layered`, `GBC-layered`): the cartridge provides the mapper
+  control, the save memory, and RTC or other cartridge peripherals. The ROM file
+  and the cartridge must be the same game with a compatible mapper and save
+  layout, for example a translated or patched ROM with the original cartridge.
+  The save always stays on the cartridge.
+- **rumble** (`GB-rumble`, `GBC-rumble`): the save is on the SD card and a
+  genuine MBC5+RUMBLE cartridge is only used as the rumble motor (see below).
+- **motion** (`GB-motion`, `GBC-motion`): the save is on the SD card and a
+  genuine MBC7 cartridge is only used as the motion sensor (see below).
+
+Use the original core for normal ROM-only or cartridge-only play.
 
 ## Installation
 To install the core, merge the `Assets`, `Cores`, and `Platforms` folders into the root of your SD card. Do not replace the existing `Assets` or `Platforms` folders when installing alongside the original core.
@@ -20,39 +29,63 @@ Place the GBC bios in `/Assets/gbc/common` named "gbc_bios.bin", the GB bios in 
 Insert the matching physical cartridge before starting the core. Select the
 patched ROM in the file browser from `/Assets/gbc/common` or
 `/Assets/gb/common`. Save data is read and written on the physical cartridge
-and no SD save file is created. To use a rumble cartridge only as a motor with
-an SD save, use the rumble cores (see below). Back up the cartridge save before
-testing on hardware.
+and no SD save file should be created (the layered cores report no save to the
+Pocket). To keep the save on the SD card and use a cartridge only for rumble or
+motion, use the rumble or motion cores (see below). Back up the cartridge save
+before using a layered core with a cartridge whose save matters to you.
 
 ### Startup safety check
 
 Before the game starts, the core reads the cartridge header (read-only, no
 writes to the cartridge) and shows a confirmation screen with the cartridge's
 and the ROM file's title, mapper type, ROM size and RAM size. The game stays in
-reset, and the cartridge's write line is not driven, until you confirm.
+reset, and the cartridge's write line is not driven, until you continue.
+This describes the layered cores; the rumble and motion cores show the same
+kind of screen but only check the cartridge type (see below).
 
-- The screen defaults to CANCEL. Select CONTINUE with the D-pad and press A.
-  B cancels, and the Pocket menu button quits the core.
-- If the cartridge has no valid Nintendo logo or header checksum, CONTINUE is
-  disabled.
-- The title, cartridge type and RAM size must match between the cartridge and
-  the ROM file. If they differ, the screen shows `HEADER FIELDS DIFFER` and
-  asks "ARE YOU SURE?" with a second confirmation, because the wrong ROM can
-  erase the cartridge save.
+- The screen only offers `>CONTINUE`: press A once to start when the headers
+  match. There is no CANCEL on this screen; the Pocket menu button quits the
+  core.
+- If the cartridge has no valid Nintendo logo or header checksum, the screen
+  shows `NO VALID GB/GBC CARTRIDGE` and CONTINUE is disabled.
+- The title, cartridge type and RAM size should match between the cartridge and
+  the ROM file. If they differ, the screen shows `HEADER FIELDS DIFFER` in
+  amber, and pressing A opens an `ARE YOU SURE?` screen with CANCEL (the
+  default) and CONTINUE. Choose with the D-pad and press A; B, or A on CANCEL,
+  goes back. The wrong ROM can erase the cartridge save.
 - ROM size and the header/global checksums are shown or ignored but do not
   trigger the warning, since translated or patched ROMs commonly change them.
   A different ROM size is visible on the screen, but it is up to you to judge
   whether it is expected.
 - A button held while picking the ROM file is ignored until released.
 
+## Building
+
+Quartus Lite 18.1, device 5CEBA4F23C8, project `src/ap_core.qpf`. The first
+lines of `src/core/core_top.sv` select the core: `` `define isgbc `` (0 = GB,
+1 = GBC), `` `define isrumble `` (1 = rumble) and `` `define ismotion `` (1 =
+motion); both 0 is a layered core. Place and route is sensitive to the seed
+(`set_global_assignment -name SEED n`, not stored in this repository's
+`ap_core.qsf`): the motion cores were built with `SEED 3`, and the layered and
+rumble cores were built from the `layered-and-rumble-cores` branch with
+`SEED 2`. Building the layered or rumble cores from this branch gives a
+different placement and not necessarily the same timing (GBC-rumble with
+`SEED 2` had a small negative hold slack here). The release bitstream is
+`output_files/ap_core.rbf` with the bits of every byte reversed (`gb.rbf_r` /
+`gbc.rbf_r` in the core folder from `pkg/`). `src/core/layered_startup_video.sv`
+is a generated text display; the generator is not part of this repository.
+
 ## Status
 
-The GB and GBC variants were successfully compiled with Quartus Lite 18.1 on 2026-10-31
+The six cores were compiled with Quartus Lite 18.1 on 2026-10-31 and 2026-11-01
 using Apple Container and Rosetta on an Apple silicon Mac. All reported timing
-summary slacks were positive. Neither variant has been validated on an Analogue Pocket.
-Sleep support is disabled. Avoid save states
-until restoring the cartridge's mapper and peripheral state is validated.
-MBC7 and other special cartridges need separate hardware validation.
+slacks were positive; the smallest are +0.012 ns (GB-layered) and +0.102 ns
+(GBC-motion), so a different Quartus version or seed may not give the same
+result. The author tested all six on an Analogue Pocket on 2026-11-01 and
+reports that they basically work; no detailed per-feature results were
+recorded.
+Sleep support is disabled. Avoid save states until restoring the cartridge's
+mapper and peripheral state is validated.
 
 ## Rumble variants (SD save)
 
@@ -74,8 +107,8 @@ In a rumble core:
   the cartridge and its RAM is never enabled or written.
 - The title/type/RAM mismatch warning does not apply.
 
-The layered cores report no save to the Pocket, so they create no `.sav` file.
-(Not yet confirmed on hardware.)
+The layered cores report no save to the Pocket, so they should create no `.sav`
+file.
 
 ## Motion variants (SD save, sensor from a cartridge)
 
@@ -90,8 +123,26 @@ card (the MBC7 EEPROM is emulated in the FPGA) and use a genuine MBC7 cartridge
   ($0000-$1FFF, $4000-$5FFF), the erase/latch writes to $A000 and $A010, and
   reads of the sensor registers $A020-$A05F. The EEPROM at $A080 and everything
   else stay in the FPGA, so the cartridge's own save is never read or written.
-- `sample-motion-game` is a tilt-ball example for this hardware.
 - The save is the raw 256-byte 93LC56 EEPROM (`<rom name>.sav`, 128 16-bit
   words, high byte first), with no RTC block, the same size emulators use.
   The byte order against emulator saves has not been compared yet.
-- Not yet validated on hardware.
+- Basic hardware test by the author: works. The save format and the sensor
+  response have not been checked in detail.
+
+### Reading the sensor from a game
+
+The sequence below is what an MBC7 game does (and what the cores expect):
+
+1. Once at start-up: write `$0A` to `$0000` and `$40` to `$4000`, write `$55` to
+   `$A000` (erase) and `$AA` to `$A010` (latch), then wait a few milliseconds.
+2. Each time you want a sample: write `$0A` / `$40` again, read X from
+   `$A020` (low) and `$A030` (high) and Y from `$A040` / `$A050`, and only
+   then erase and latch the next sample with the same two writes. Reading
+   straight after latching returns `$8000` ("nothing latched yet"). A level
+   console reads about `$81D0` on both axes; only the low 12 bits count.
+3. The EEPROM (93LC56, 16-bit words) is bit-banged through `$A080` (bit 7 chip
+   select, bit 6 clock, bit 1 data in, bit 0 data out): a start bit, a 2-bit
+   opcode and an 8-bit address, then 16 data bits, most significant first.
+   Write enable (`00 11xxxxxx`) has to be sent in its own chip-select cycle
+   before a write, and the clock must be brought low before the first data bit
+   is read.
