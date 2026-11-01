@@ -81,7 +81,7 @@ The layered cores report no save to the Pocket, so they create no `.sav` file.
 
 `GB-motion` and `GBC-motion` run a game from the SD card with its save on the SD
 card (the MBC7 EEPROM is emulated in the FPGA) and use a genuine MBC7 cartridge
-(Kirby Tilt 'n' Tumble, header type 0x22) only as the motion sensor.
+(an MBC7 motion cartridge, header type 0x22) only as the motion sensor.
 
 - The startup screen requires an MBC7 cartridge (`NEED MBC7 SENSOR CARTRIDGE`
   otherwise, and CONTINUE is disabled). A ROM that is not MBC7 is flagged with
