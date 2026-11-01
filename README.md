@@ -87,6 +87,34 @@ recorded.
 Sleep support is disabled. Avoid save states until restoring the cartridge's
 mapper and peripheral state is validated.
 
+## Layered cores (cartridge save)
+
+`GB-layered` and `GBC-layered` share the work between the ROM file and the
+cartridge, which must be the same game:
+
+- **From the SD card (the ROM file):** the program code and the ROM banking. The
+  ROM is always read from the file, never from the cartridge, so a translated or
+  patched ROM may be larger or have different checksums. The ROM file's header
+  decides which mapper is emulated for ROM banking.
+- **From the cartridge:** everything in the cartridge RAM window
+  (`$A000-$BFFF`): save RAM, the RTC and special hardware such as the camera, the
+  MBC7 sensor and EEPROM, or rumble. Reads of that window go to the cartridge,
+  and every write the game makes, mapper registers included, is also forwarded
+  to it, so the cartridge's own mapper stays in step with the game.
+- **The save stays on the cartridge.** The core reports no save to the Pocket,
+  so no `.sav` file should be created.
+
+What this means in practice:
+
+- The ROM file and the cartridge need a compatible mapper type and RAM size. The
+  core never copies one side's mapper or RAM parameters onto the other: it shows
+  both headers on the startup screen and, if title, type or RAM size differ,
+  asks twice before continuing, because the wrong ROM can erase the cartridge
+  save.
+- Nothing is written to the cartridge before you continue on the startup screen.
+- Avoid save states and sleep, because the cartridge's mapper and peripheral
+  state cannot be restored by the core. Back up the cartridge save before use.
+
 ## Rumble variants (SD save)
 
 Two more cores, `GB-rumble` and `GBC-rumble`, are built from the same sources
@@ -192,6 +220,20 @@ Quartus Lite 18.1，器件 5CEBA4F23C8，工程为 `src/ap_core.qpf`。`src/core
 ### 状态
 
 六个核心于 2026-10-31 和 2026-11-01 在 Apple 芯片的 Mac 上用 Apple Container 加 Rosetta、Quartus Lite 18.1 编译。所有报告的时序余量都是正的，最小的是 +0.012 ns（GB-layered）和 +0.102 ns（GBC-motion），所以换一个 Quartus 版本或种子不一定得到同样的结果。作者于 2026-11-01 在 Analogue Pocket 上测试了全部六个核心，反馈基本可用，没有记录逐项功能的详细结果。休眠功能已禁用。在验证过卡带映射器和外设状态的恢复之前，请避免使用即时存档。
+
+### Layered 核心（卡带存档）
+
+`GB-layered` 和 `GBC-layered` 由 ROM 文件和实体卡带分工完成，两者必须是同一个游戏：
+
+- **来自 SD 卡（ROM 文件）：**程序代码和 ROM 的 bank 切换。ROM 始终从文件读取，从不读卡带，所以汉化或打过补丁的 ROM 可以更大，校验和也可以不同。ROM 文件头决定用哪种映射器来模拟 ROM 的 bank 切换。
+- **来自卡带：**卡带 RAM 窗口（`$A000–$BFFF`）里的一切：存档 RAM、RTC，以及摄像头、MBC7 的传感器和 EEPROM、震动等特殊硬件。对这个窗口的读取会到卡带上，游戏发出的每一次写入（包括映射器寄存器）也会转发给卡带，让卡带自己的映射器与游戏保持同步。
+- **存档始终留在卡带上。**核心向 Pocket 报告没有存档，所以不应生成 `.sav` 文件。
+
+实际使用时的含义：
+
+- ROM 文件和卡带需要有兼容的映射器类型和 RAM 大小。核心从不把一方的映射器或 RAM 参数套用到另一方：它会在启动页同时显示两边的卡带头，标题、类型或 RAM 大小不一致时要求你确认两次才能继续，因为用错 ROM 可能抹掉卡带存档。
+- 在启动页点继续之前，不会向卡带写入任何内容。
+- 请避免使用即时存档和休眠，因为核心无法恢复卡带的映射器和外设状态。使用前请先备份卡带存档。
 
 ### Rumble 核心（SD 存档）
 
