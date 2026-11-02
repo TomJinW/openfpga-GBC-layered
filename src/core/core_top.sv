@@ -800,13 +800,14 @@ assign cart_oe = cart_ram_window ? cart_read_access : cart_oe_backend;
 wire [255:0] startup_rom_header, startup_cart_header;
 wire startup_accepted, startup_ready, startup_valid, startup_selection, startup_match, startup_confirm;
 wire [15:0] startup_probe_addr;
-wire startup_probe_read;
+wire startup_probe_read, startup_probe_wr, startup_probe_wdrive;
 wire [15:0] physical_addr = startup_accepted ? {cart_a15, cart_addr} : startup_probe_addr;
 layered_startup #(.RUMBLE_CORE(`isrumble), .MOTION_CORE(`ismotion)) startup (
   .clk(clk_sys), .reset(reset), .rom_download(cart_download),
   .ioctl_wr(ioctl_wr), .ioctl_addr(ioctl_addr), .ioctl_data(ioctl_dout),
   .keys(cont1_key_s), .cart_data(cart_tran_bank1),
   .probe_addr(startup_probe_addr), .probe_read(startup_probe_read),
+  .probe_wr(startup_probe_wr), .probe_wdrive(startup_probe_wdrive),
   .accepted(startup_accepted), .ready(startup_ready), .valid_cart(startup_valid),
   .select_continue(startup_selection), .fields_match(startup_match), .confirm(startup_confirm),
   .sd_available(startup_sd_avail), .sd_save(startup_sd_save),
@@ -820,11 +821,11 @@ assign cart_tran_bank3_dir = 1'b1;
 assign cart_tran_bank2     = physical_addr[15:8];
 assign cart_tran_bank2_dir = 1'b1;
 
-assign cart_tran_bank1     = cart_write_access ? cart_di : 8'hzz;
-assign cart_tran_bank1_dir = cart_write_access;
+assign cart_tran_bank1     = cart_write_access ? cart_di : (startup_probe_wdrive ? 8'h00 : 8'hzz);
+assign cart_tran_bank1_dir = cart_write_access || startup_probe_wdrive;
 
 assign cart_tran_bank0     = {cart_phi,
-                              cart_write_access ? 1'b0 : 1'b1,
+                              (cart_write_access || startup_probe_wr) ? 1'b0 : 1'b1,
                               (cart_read_access || startup_probe_read) ? 1'b0 : 1'b1,
                               cart_access ? nCS : 1'b1};
 assign cart_tran_bank0_dir = 1'b1;
