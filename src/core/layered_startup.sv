@@ -10,6 +10,8 @@ module layered_startup #(parameter RUMBLE_CORE = 0) (
   input wire [7:0] cart_data,
   output wire [15:0] probe_addr,
   output wire probe_read,
+  output wire probe_wr,      // /WR low request for the one rumble-off write
+  output wire probe_wdrive,  // drive the data bus (with zero) for that write
   output reg accepted = 0,
   output wire ready,
   output reg valid_cart = 0,
@@ -27,6 +29,8 @@ module layered_startup #(parameter RUMBLE_CORE = 0) (
   reg [31:0] keys_prev = 0;
   reg armed = 0;
   reg [6:0] index = 0;
+  reg cleared = 0;
+  reg [5:0] wr_phase = 0;
   reg [5:0] phase = 0;
   reg logo_ok = 1;
   reg [7:0] checksum = 0;
@@ -44,7 +48,16 @@ module layered_startup #(parameter RUMBLE_CORE = 0) (
   // With an SD save the cartridge is not the ROM's game, so a mismatch is expected.
   assign fields_match = sd_save || header_match;
   wire probing = loaded && !done && !rom_download && !reset;
-  assign probe_addr = 16'h0100 + index;
+  // Some third-party flash cartridges come up with the rumble bit (bit 3 of the
+  // MBC5 RAM bank register) set once they are read, which keeps the motor on
+  // until the game writes the register. For a cartridge whose header says MBC5
+  // RUMBLE (0x1C..0x1E), write 0 to $4000 once after the header was read. That
+  // only selects RAM bank 0 and turns the motor off; no save memory is touched.
+  wire rumble_cart = valid_cart && cart_header[191:184] >= 8'h1C && cart_header[191:184] <= 8'h1E;
+  wire clear_active = ready && !accepted && !cleared && rumble_cart;
+  assign probe_addr = clear_active ? 16'h4000 : 16'h0100 + index;
+  assign probe_wr = clear_active && wr_phase >= 8 && wr_phase < 40;
+  assign probe_wdrive = clear_active && wr_phase >= 4 && wr_phase < 44;
   // At 33.55 MHz: address setup 238 ns, read pulse 954 ns,
   // sample after 924 ns of /RD, then 477 ns between read pulses.
   assign probe_read = probing && phase >= 8 && phase < 40;
@@ -74,6 +87,8 @@ module layered_startup #(parameter RUMBLE_CORE = 0) (
       logo_ok <= 1;
       checksum <= 0;
       cart_header <= 0;
+      cleared <= 0;
+      wr_phase <= 0;
     end else if (probing) begin
       phase <= phase + 1'b1;
       if (phase == 39) begin
@@ -89,6 +104,13 @@ module layered_startup #(parameter RUMBLE_CORE = 0) (
         else index <= index + 1'b1;
       end
     end else if (ready && !accepted) begin
+      if (clear_active) begin
+        wr_phase <= wr_phase + 1'b1;
+        if (wr_phase == 47) begin
+          cleared <= 1;
+          wr_phase <= 0;
+        end
+      end
       // Do not accept a button held through the ROM file browser.
       if (!(|keys[5:0])) armed <= 1;
       if (armed) begin
